@@ -1,0 +1,215 @@
+## Ames Iowa House Sales Price Modeling
+# Predict 413, Northwestern University
+# By:  Justice Denoo
+
+library(mice)
+library(psych)
+library(gbm)
+library(mice)
+library(dplyr)
+library(plyr)
+library(gbm)
+library(MASS)
+library(randomForest)
+
+setwd("/Users/jdenoo/Documents/NorthWestern/Predict_413/Final")
+rm(list=ls())
+train.raw <- read.csv("train.csv",stringsAsFactors=T)
+test.raw <- read.csv("test.csv",stringsAsFactors=T)
+sum(is.na(train.raw))+sum(is.na(test.raw)) #[1] 13965
+
+n.train=nrow(train.raw) #[1] 1460
+n.test=nrow(test.raw) #[1] 1459
+test.raw$SalePrice=0
+Id=test.raw$Id 
+total=rbind(train.raw,test.raw)
+n.total=nrow(total)   # [1] 2919
+sum(is.na(total))  # [1] 13965
+
+total=rbind(train.raw,test.raw)
+n.total=nrow(total)   # [1] 2919
+sum(is.na(total))  # [1] 13965
+total$Id=NULL
+
+numeric.var <- names(total)[which(sapply(total, is.numeric))]
+tnum <- total[ , which(names(total) %in% numeric.var)]
+correlations <- cor(na.omit(tnum))
+row.ind <- apply(correlations, 1, function(x) sum(x > 0.1 | x < -0.1) > 1)
+correlations<- correlations[row.ind ,row.ind ]
+corrplot(correlations, method="square")
+
+correlations[,36]
+ 
+a=rep(0,length(ncol(total)))
+for(i in 1:ncol(total)){a[i]=sum(is.na(total[,i]))}
+a
+#variables with missing values
+names(total[c(2,3,6,9,23:26,30:38,42,47,48,53,55,57:64,72:74,78)])
+
+########New addition###### Impute missing data by creating new levels
+
+total$FireplaceQu <- ordered(total$FireplaceQu, levels = c("None","Po", "Fa","TA", "Gd", "Ex"))
+total$FireplaceQu[is.na(total$FireplaceQu)] <- "None"
+
+total$GarageQual <- ordered(total$GarageQual, levels = c("None","Po", "Fa","TA", "Gd", "Ex"))
+total$GarageQual[is.na(total$GarageQual)] <- "None"
+
+total$GarageCond <- ordered(total$GarageCond, levels = c("None","Po", "Fa","TA", "Gd", "Ex"))
+total$GarageCond[is.na(total$GarageCond)] <- "None"
+
+total$GarageFinish <- ordered(total$GarageFinish, levels = c("None",'Unf','RFn', 'Fin' ))
+total$GarageFinish[is.na(total$GarageFinish)] <- "None"
+total$Alley <- ordered(total$Alley, levels = c("None",'Grvl','Pave'))
+total$Alley[is.na(total$Alley)] <- "None"
+total$Fence <- ordered(total$Fence, levels = c( "None",'MnWw','MnPrv' ,'GdWo', 'GdPrv'))
+total$Fence[is.na(total$Fence)] <- "None"
+total$BsmtFullBath[is.na(total$BsmtFullBath)] <- 0
+total$BsmtHalfBath[is.na(total$BsmtHalfBath)] <- 0
+total$TotalBsmtSF[is.na(total$TotalBsmtSF)] <- 0
+total$BsmtUnfSF[is.na(total$BsmtUnfSF)] <- 0
+total$BsmtFinSF2[is.na(total$BsmtFinSF2)] <- 0
+total$BsmtFinSF1[is.na(total$BsmtFinSF1)] <- 0
+total$GarageArea[is.na(total$GarageArea)] <- 0
+total$GarageCars[is.na(total$GarageCars)] <- 0
+total$MSZoning[is.na(total$MSZoning)] <- "RL"
+total$SaleType[is.na(total$SaleType)] <- "Oth"
+total$Functional[is.na(total$Functional)] <- "Maj2"  
+total$Exterior1st[is.na(total$Exterior1st)] <- "BrkComm"
+total$Exterior2nd[is.na(total$Exterior2nd)] <- "Brk Cmn"
+total$Utilities[is.na(total$Utilities)] <- "NoSeWa"
+total$MasVnrArea[is.na(total$MasVnrArea)] <- 0
+total$PoolQC =NULL
+total$MiscFeature =NULL
+total$GarageType=NULL
+total$GarageYrBlt=NULL
+total$Id=NULL
+total$Condition2=NULL 
+total$RoofStyle=NULL
+total$RoofMatl=NULL
+total$Exterior1st=NULL
+total$Exterior2nd =NULL
+total$Heating =NULL
+
+sum(is.na(total))  ## 916
+
+####################DImpute Missing using mice #########################
+
+imp=mice(total[,-74],m=3,method="cart") #excludes SalePrice
+total.imp=complete(imp)
+
+#write.csv(totalimp,"total_imp.csv")
+
+####################Simple Feature Creation and transformations  #########################
+
+total.imp$GrLivArea=log(total.imp$GrLivArea)
+total.imp$LotArea=log(total.imp$LotArea)
+total.imp$TotalBath=total.imp$BsmtFullBath+total.imp$BsmtHalfBath/2 + total.imp$FullBath + total.imp$HalfBath/2
+total.imp$TotalFlrSF= total.imp$BsmtFinSF1+ total.imp$X1stFlrSF + total.imp$X2ndFlrSF
+total.imp$TotalFlrSF=log(total.imp$TotalFlrSF)
+total$Remodeled=ifelse(total$YearBuilt==total$YearRemodAdd, total$YearBuilt, total$YearRemodAdd)
+total$YearBuilt=NULL
+total$YearRemodAdd=NULL
+
+total.imp$YearMo=as.numeric(total.imp$YrSold)*12+as.numeric(total.imp$MoSold)
+total.imp$MoSold=as.factor(total.imp$MoSold) #make these factors
+total.imp$YrSold=as.factor(total.imp$YrSold) #make these factors
+
+total.imp$TotalBsmtSF=NULL
+total.imp$BsmtFinSF1=NULL
+ total.imp$X1stFlrSF =NULL
+total.imp$X2ndFlrSF=NULL
+total.imp$BsmtFullBath=NULL
+total.imp$BsmtHalfBath=NULL
+total.imp$FullBath=NULL
+total.imp$HalfBath=NULL
+
+#write.csv(totalimp, "totalimp.csv")
+
+## devide total.imp to train and test set 
+train.imp=total.imp[1:1460,]
+test.imp=total.imp[1461:2919,]
+
+train.imp$SalePrice=log(train.imp$SalePrice)
+########
+set.seed(2)
+train.val = sample(1:nrow(train.imp), 1000)
+y.val=train.imp[-train.val ,"SalePrice"]
+#y.val=train.imp[-train.val ,]$SalePrice
+
+########## Regression Model
+lm.fit1=lm(log(totalimp$SalePrice[1:1460])~., data=totalimp[1:1460,])
+lm.var=stepAIC(lm.fit1, direction="both")
+lm.var$anova
+# using selected variable in lm.var, fine tune below to improve accuracy
+# by adding second power term of GrLivArea and TotalFlrSF in our new model
+
+lm.fit=lm(SalePrice ~ MSSubClass + MSZoning + LotFrontage + 
+    LotArea + Street + LandContour + Utilities + LotConfig + 
+    LandSlope + Neighborhood + Condition1 + BldgType + HouseStyle + 
+    OverallQual + OverallCond + Foundation + BsmtQual + 
+    BsmtExposure + BsmtFinType1 + HeatingQC + CentralAir + GrLivArea + 
+    KitchenAbvGr + KitchenQual + Functional + Fireplaces + GarageCars + 
+    GarageQual + GarageCond + WoodDeckSF + ScreenPorch + SaleType + 
+    SaleCondition + Remodeled + TotalBath + TotalFlrSF + I(GrLivArea^2) + 
+    I(TotalFlrSF^2), data = train.imp[train.val ,])
+
+lm.pred1=predict(lm.fit,train.imp[-train.val ,])
+exp(mean((lm.pred1 - train.imp$SalePrice[-train.val])^2))  ## MSE =  1.017477
+
+#### buld new model using full train set
+lmfit=lm(SalePrice ~ MSSubClass + MSZoning + LotFrontage + 
+    LotArea + Street + LandContour + Utilities + LotConfig + 
+    LandSlope + Neighborhood + Condition1 + BldgType + HouseStyle + 
+    OverallQual + OverallCond + Foundation + BsmtQual + 
+    BsmtExposure + BsmtFinType1 + HeatingQC + CentralAir + GrLivArea + 
+    KitchenAbvGr + KitchenQual + Functional + Fireplaces + GarageCars + 
+    GarageQual + GarageCond + WoodDeckSF + ScreenPorch + SaleType + 
+    SaleCondition + Remodeled + TotalBath + TotalFlrSF + I(GrLivArea^2) + 
+    I(TotalFlrSF^2), data = train.imp)
+
+#Predicting SalesPrice on test data
+lmpred1=predict(lmfit,test.imp)
+
+lmresult <- data.frame(Id, SalePrice=exp(lmpred1)) # data frame with two variables: ID and SalePrice
+write.csv(lmresult, file="lm_JD.csv", row.names=FALSE) ##### Kaggle = 	0.13023
+
+##@@@@@@@@@@@@@@@@@@@@@@@@@RANDOMFOREST##############
+
+#validation model for randomForest
+set.seed(2)
+rf.train=randomForest(SalePrice~., data=train.imp[train.val,], mtry=8,importance =TRUE)
+rf.train
+yhat.rf = predict(rf.train ,newdata=train.imp[-train.val,])
+ exp(mean((yhat.rf -train.imp$SalePrice[-train.val])^2))  #  [1] 1.019356
+ 
+ ## Actual randomForest prediction model
+ set.seed(1)
+rf.train=randomForest(SalePrice~., data=train.imp, mtry=8,importance =TRUE)
+
+#Predicting SalesPrice on test data
+yhat.rf=predict(rf.train,newdata=test.imp)
+rf.result <- data.frame(Id, SalePrice=exp(yhat.rf)) # data frame with two variables: ID and SalePrice
+write.csv(rf.result, file="rf_JD2.csv", row.names=FALSE) # use your initials for the file name  ### Kaggle = 0.14590
+varImpPlot(rf.train, col="navy")
+
+##@@@@@@@@@@@@@@@@@@@@@@@@@ Gradient Boosting ##############
+#### validating model Gradient Boosting
+
+ set.seed(2)
+boost2.train=gbm(SalePrice~.-ExterCond-Utilities,data=train.imp[train.val,],
+distribution= "gaussian",n.trees=1800, interaction.depth=11,shrinkage =0.01, verbose =F)
+yhat.boost2=predict(boost2.train,newdata=train.imp[-train.val,], n.trees=1800)
+exp(mean((yhat.boost2 -train.imp$SalePrice[-train.val])^2)) #  [1] 1.013937 [1] 1.016942
+
+##  Implement GBM model @@@@@@@@@
+set.seed(1)
+boost2.train=gbm(SalePrice~.,data=train.imp,
+distribution= "gaussian",n.trees=1800, interaction.depth=11,shrinkage =0.01, verbose =F)
+
+#Predicting SalesPrice on test data
+yhat.boost2=predict(boost2.train,newdata=test.imp, n.trees=1800)
+
+b2.result <- data.frame(Id, SalePrice=exp(yhat.boost2)) # data frame with two variables: ID and SalePrice
+write.csv(b2.result, file="gbm_JD2.csv", row.names=FALSE) #### Kaggle= 0.12631
+
+
